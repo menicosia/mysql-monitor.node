@@ -1,0 +1,5 @@
+---
+applications:
+- name: mysql-monitor
+  command: node mysql-monitor.js
+

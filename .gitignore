@@ -1,3 +1,6 @@
+.git/*
+*~
+
 # Logs
 logs
 *.log
