@@ -5,7 +5,9 @@
   "dependencies": {
     "strftime": "0.8.2",
     "mysql": "2.8.0",
-    "redis": "0.12.1"
+    "redis": "0.12.1",
+    "serve-static": "1.10.0",
+    "finalhandler": "0.4.0"
   },
   "engines": {
     "node": "0.10.x",

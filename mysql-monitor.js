@@ -1,4 +1,6 @@
+var finalhandler = require('finalhandler') ;
 var http = require('http') ;
+var serveStatic = require('serve-static') ;
 var strftime = require('strftime') ;
 // var sleep = require('sleep') ;
 var url = require('url') ;
@@ -63,13 +65,14 @@ function MySQLConnect() {
 }
 
 
-// MAIN
-monitorServer = http.createServer(function (request, response) {
+function apiRequests(request, response) {
     data = "" ;
+    var matchRequest = Boolean(false) ;
     rootCall = request.url.match(/([^&]+)/)[0] ;
     console.log("Recieved request for: " + rootCall) ;
     switch (rootCall) {
     case "/env":
+        matchRequest = true ;
 	      if (process.env) {
 	          data += "<p>" ;
 		        for (v in process.env) {
@@ -81,18 +84,20 @@ monitorServer = http.createServer(function (request, response) {
 	      }
 	      break ;
     case "/dbstatus":
-        callBack = request.url.match(/callback=(\w+)/)[1] ;
-        data += callBack + "(\"Call Received\")" ;
+        matchRequest = true ;
+        data += JSON.stringify({"dbStatus":dbConnectState}) ;
         break ;
-    // case "/sleep":
-    //     data += "Sleeping 5 seconds." ;
-    //     sleep.sleep(5) ;
-    //     break ;
     case "/ping":
-        dbConnection.ping(pingCB) ;
-        data += "OK, will ping the DB. Watch the log for a response." ;
+        matchRequest = true ;
+        if (dbConnectState) {
+            doPing() ;
+            data += "OK, will ping the DB. Watch the log for a response." ;
+        } else {
+            data += "I'm sorry, Dave, I can't do that. No connection to the database." ;
+        }
         break ;
-	  default:
+    case "/":
+        matchRequest = true ; 
         data += "<h1>MySQL Monitor</h1>\n" ;
 	      data += "<p>" + strftime("%Y-%m-%d %H:%M") + "<br>\n" ;
 	      data += "<p>Request was: " + request.url + "<br>\n" ;
@@ -104,10 +109,25 @@ monitorServer = http.createServer(function (request, response) {
         data += "</p\n<hr>\n" ;
         data += "<A HREF=\"" + url.resolve(request.url, "env") + "\">/env</A>  " ;
         data += "<A HREF=\"" + url.resolve(request.url, "ping") + "\">/ping</A>  " ;
-        // data += "<A HREF=\"" + url.resolve(request.url, "sleep") + "\">/sleep</A><br>\n" ;
+        break ;
 	  }
 
-	  response.end(data + '\n') ;
+    if (matchRequest) {
+	      response.end(data + '\n') ;
+        return(true) ;
+    } else {
+        return(false) ;
+    }
+    
+}
+
+// MAIN
+var staticServer = serveStatic("static") ;
+monitorServer = http.createServer(function(req, res) {
+    if (! apiRequests(req, res)) {
+        var done = finalhandler(req, res) ;
+        staticServer(req, res, done)
+    }
 }) ;
 
 monitorServer.listen(port) ;
