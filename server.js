@@ -42,8 +42,13 @@ if (process.env.VCAP_SERVICES) {
     if (vcap_services['p-mysql']) {
         pm_credentials = vcap_services["p-mysql"][0]["credentials"] ;
         pm_uri = pm_credentials["uri"] ;
-        console.log("Got access credentials to database: " + pm_uri) ;
+        console.log("Got access p-mysql credentials: " + pm_uri) ;
         activateState=true ;
+    } else if (vcap_services['cleardb']) {
+        pm_credentials = vcap_services["cleardb"][0]["credentials"] ;
+        pm_uri = pm_credentials["uri"] ;
+        console.log("Got access to cleardb credentials: " + pm_uri) ;
+        activateState=true;
     }
     if (vcap_services['redis']) {
         redis_credentials = vcap_services["redis"][0]["credentials"] ;
