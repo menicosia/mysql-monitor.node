@@ -40,13 +40,11 @@ var lastKey ;
 if (process.env.VCAP_SERVICES) {
     vcap_services = JSON.parse(process.env.VCAP_SERVICES) ;
     if (vcap_services['p-mysql']) {
-        pm_credentials = vcap_services["p-mysql"][0]["credentials"] ;
-        pm_uri = pm_credentials["uri"] ;
+        pm_uri = vcap_services["p-mysql"][0]["credentials"]["uri"] ;
         console.log("Got access p-mysql credentials: " + pm_uri) ;
         activateState=true ;
     } else if (vcap_services['cleardb']) {
-        pm_credentials = vcap_services["cleardb"][0]["credentials"] ;
-        pm_uri = pm_credentials["uri"] ;
+        pm_uri = vcap_services["cleardb"][0]["credentials"]["uri"];
         console.log("Got access to cleardb credentials: " + pm_uri) ;
         activateState=true;
     }
@@ -120,7 +118,7 @@ function handleRedisConnect(message, err) {
         break ;
     }
 }
-        
+
 
 // Helper functions
 function recordDBStatusHelper(err, res, bool) {
@@ -205,7 +203,7 @@ function apiRequests(request, response) {
         }
         break ;
     case "/":
-        matchRequest = true ; 
+        matchRequest = true ;
         data += "<h1>MySQL Monitor</h1>\n" ;
 	      data += "<p>" + strftime("%Y-%m-%d %H:%M") + "<br>\n" ;
 	      data += "<p>Request was: " + request.url + "<br>\n" ;
@@ -226,7 +224,7 @@ function apiRequests(request, response) {
     } else {
         return(false) ;
     }
-    
+
 }
 
 // MAIN
