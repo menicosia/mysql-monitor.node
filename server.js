@@ -6,6 +6,7 @@ var time = require('time') ;
 var url = require('url') ;
 var mysql = require('mysql') ;
 var redis = require('redis') ;
+var util = require('util') ;
 
 // CONFIGURE THESE
 var numSecondsStore = 600 // Default 10 minutes
@@ -34,23 +35,23 @@ var redisClient = undefined ;
 var redisConnectionState = Boolean(false) ;
 
 var lastUpdate ;
-var lastKey ;
+var lastOffset ;
 
 // Setup based on Environment Variables
 if (process.env.VCAP_SERVICES) {
     vcap_services = JSON.parse(process.env.VCAP_SERVICES) ;
     if (vcap_services['p-mysql']) {
         pm_uri = vcap_services["p-mysql"][0]["credentials"]["uri"] ;
-        console.log("Got access p-mysql credentials: " + pm_uri) ;
+        util.log("Got access p-mysql credentials: " + pm_uri) ;
         activateState=true ;
     } else if (vcap_services['cleardb']) {
         pm_uri = vcap_services["cleardb"][0]["credentials"]["uri"];
-        console.log("Got access to cleardb credentials: " + pm_uri) ;
+        util.log("Got access to cleardb credentials: " + pm_uri) ;
         activateState=true;
     }
     if (vcap_services['redis']) {
         redis_credentials = vcap_services["redis"][0]["credentials"] ;
-        console.log("Got access credentials to redis: " + JSON.stringify(redis_credentials)) ;
+        util.log("Got access credentials to redis: " + JSON.stringify(redis_credentials)) ;
     }
 }
 
@@ -68,7 +69,7 @@ function handleDBConnect(err) {
         console.error("Error connecting to DB: " + err.code + "\nWill try again in 1s.") ;
         setTimeout(MySQLConnect, 1000) ;
     } else {
-        console.log("Connected to database. Commencing ping every 1s.") ;
+        util.log("Connected to database. Commencing ping every 1s.") ;
         dbConnectState = true ;
         setInterval(doPing, 1000) ;
     }
@@ -81,40 +82,40 @@ function handleDBping(err) {
         dbClient.destroy() ;
         MySQLConnect() ;
     } else {
-        // console.log("[" + myIndex + "] Server responded to ping.") ;
+        // util.log("[" + myIndex + "] Server responded to ping.") ;
         recordDBStatus(1) ;
     }
 }
 
 function handleLastKey(err, res) {
     if (err) {
-        console.log("Error from redis: " + err) ;
+        util.log("Error from redis: " + err) ;
     } else {
-        console.log("Setting lastKey to: " + res) ;
-        lastKey = res ;
+        util.log("Setting lastOffset to: " + res) ;
+        lastOffset = res ;
     }
 }
 function handleLastTime(err, res) {
     if (err) {
-        console.log("Error from redis: " + err) ;
+        util.log("Error from redis: " + err) ;
     } else {
-        console.log("Setting lastKey to: " + res) ;
+        util.log("Setting lastOffset to: " + res) ;
         lastTime = res ;
     }
 }
 function handleRedisConnect(message, err) {
-    console.log("handleRedisConnect called with message: " + message) ;
+    util.log("handleRedisConnect called with message: " + message) ;
     switch (message) {
     case "error":
         redisConnectionState = false ;
-        console.log("Redis connection failed: " + err + "\nWill try again in 3s." ) ;
+        util.log("Redis connection failed: " + err + "\nWill try again in 3s." ) ;
         setTimeout(RedisConnect, 3000) ;
         break ;
     case "ready":
         redisConnectionState = true ;
         redisClient.hget(myInstance, "lastKeyUpdated", handleLastKey) ;
         redisClient.hget(myInstance, "lastUpdate", handleLastTime) ;
-        console.log("Redis READY.") ;
+        util.log("Redis READY.") ;
         break ;
     }
 }
@@ -123,7 +124,7 @@ function handleRedisConnect(message, err) {
 // Helper functions
 function recordDBStatusHelper(err, res, bool) {
     if (err) {
-        console.log("Error from redis: " + err) ;
+        util.log("Error from redis: " + err) ;
     } else {
         // write a 1 to the current second in redis
         lastTime = res ;
@@ -242,5 +243,5 @@ if (activateState) {
     RedisConnect() ;
 }
 
-console.log("Server up and listening on port: " + port) ;
+util.log("Server up and listening on port: " + port) ;
 
