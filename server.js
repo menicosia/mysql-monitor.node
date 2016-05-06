@@ -172,13 +172,31 @@ function RedisConnect() {
     }
 }
 
-function apiRequests(request, response) {
+function bitsHelper(req, res, data) {
+    util.log("****************************************") ;
+    util.log(data) ;
+    res.end(data) ;
+    return(true) ;
+}
+
+function dispatchApi(req, res, method, query) {
+    switch(method) {
+    case "0bits":
+        redisClient.get('Instance_0_Bits', function (err, reply) {
+            bitsHelper(req, res, reply) ;
+        } ) ;
+        break ;
+    }
+}
+
+function requestHandler(request, response) {
     data = "" ;
     var matchRequest = Boolean(false) ;
-    rootCall = request.url.match(/([^&]+)/)[0] ;
-    console.log("Recieved request for: " + rootCall) ;
+    requestParts = url.parse(request.url, true);
+    rootCall = requestParts['pathname'].split('/')[1] ;
+    util.log("Recieved request for: " + rootCall) ;
     switch (rootCall) {
-    case "/env":
+    case "env":
         matchRequest = true ;
 	      if (process.env) {
 	          data += "<p>" ;
@@ -190,11 +208,11 @@ function apiRequests(request, response) {
 		        data += "<p> No process env? <br>\n" ;
 	      }
 	      break ;
-    case "/dbstatus":
+    case "dbstatus":
         matchRequest = true ;
         data += JSON.stringify({"dbStatus":dbConnectState}) ;
         break ;
-    case "/ping":
+    case "ping":
         matchRequest = true ;
         if (dbConnectState) {
             doPing() ;
@@ -203,11 +221,16 @@ function apiRequests(request, response) {
             data += "I'm sorry, Dave, I can't do that. No connection to the database." ;
         }
         break ;
-    case "/":
+    case "api":
+        var method = requestParts['pathname'].split('/')[2] ;
+        dispatchApi(request, response, method, requestParts['query']) ;
+        return true ;
+        break ;
+    default:
         matchRequest = true ;
         data += "<h1>MySQL Monitor</h1>\n" ;
-	      data += "<p>" + strftime("%Y-%m-%d %H:%M") + "<br>\n" ;
-	      data += "<p>Request was: " + request.url + "<br>\n" ;
+        data += "<p>" + strftime("%Y-%m-%d %H:%M") + "<br>\n" ;
+        data += "<p>Request was: " + request.url + "<br>\n" ;
         if (activateState) {
 	          data += "Database connection info: " + pm_uri + "<br>\n" ;
         } else {
@@ -217,7 +240,7 @@ function apiRequests(request, response) {
         data += "<A HREF=\"" + url.resolve(request.url, "env") + "\">/env</A>  " ;
         data += "<A HREF=\"" + url.resolve(request.url, "ping") + "\">/ping</A>  " ;
         break ;
-	  }
+    }
 
     if (matchRequest) {
 	      response.end(data + '\n') ;
@@ -231,10 +254,8 @@ function apiRequests(request, response) {
 // MAIN
 var staticServer = serveStatic("static") ;
 monitorServer = http.createServer(function(req, res) {
-    if (! apiRequests(req, res)) {
-        var done = finalhandler(req, res) ;
-        staticServer(req, res, done)
-    }
+    var done = finalhandler(req, res) ;
+    staticServer(req, res, function() { requestHandler(req, res, done) ; } ) ;
 }) ;
 
 monitorServer.listen(port) ;
