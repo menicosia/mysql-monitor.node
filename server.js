@@ -132,11 +132,11 @@ function recordDBStatusHelper(err, res, bool) {
         if (now < lastTime) {
             console.error("Last updated time is in the future?! Waiting to catch up...")
         } else {
-            nextKey = (lastKey + (now-lastTime)) % numSecondsStore // round-robin when reaching N seconds
-            redisClient.setbit(myInstanceBits, nextKey, bool)
+            nextKey = (lastOffset + (now-lastTime)) % numSecondsStore // round-robin when reaching N seconds
+            redisClient.setbit(myInstanceBits, nextKey, bool) ;
             redisClient.hmset(myInstance, "lastKeyUpdated", nextKey, "lastUpdate", now) ;
-            lastKey = nextKey ;
-            console.log("Updated DB status: " + bool + " lastKeyUpdated: " + nextKey + " lastUpdate: " + now) ;
+            lastOffset = nextKey ;
+            util.log("Updated DB status: " + bool + " lastKeyUpdated: " + nextKey + " lastUpdate: " + now) ;
         }
     }
 }
