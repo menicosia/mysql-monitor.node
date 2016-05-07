@@ -12,29 +12,66 @@ function bitmaskArray() {
     }
 }
 
-function byteToBool(byte, offset) {
-    var bitmasks = bitmaskArray() ;
-    var bitmask = bitmasks[offset] ;
-    if ((byte & bitmasks[offset]) == bitmasks[offset]) { return true }
-    else { return (false) }
-}
-
-for (x = 0 ; x < width(bitfield) % 64 ; x++) {
-  for (i = x*64 ; i < (x*64)-1 && i < width(bitfield) ; i++ ) {
-      if byteToBool(bitfield, i) { green} else { red }
-  }
-}
-}
-
 function showInstanceBits(response) {
-    var span = document.getElementById("bits") ;
-    if ( 0 == response[0] ) {
-      span.innerHTML = "0" ;
-    } else if ( 1 == response[0]) {
-        span.innerHTML = "1" ;
-    } else {
-        span.innerHTML = "Not having a BIT of this." ;
+    var timeSeries = JSON.parse(response) ;
+    drawData(timeSeries) ;
+    draw(timeSeries) ;
+}
+
+function draw(data) {
+    var wScale = 1 ;
+    var hScale = 100 ;
+
+    var timeline = document.getElementById('timeline');
+    timeline.innerHTML = "<canvas id='canvas' width=600 height=" + hScale + "></canvas>"
+
+
+    var canvas = document.getElementById('canvas');
+    var context = canvas.getContext("2d") ;
+    var i = 0 ;
+    for (var i in data) {
+        var dataPoint = data[i] ;
+        if (dataPoint == "0") {
+            context.fillStyle="red" ;
+        } else if (dataPoint == "1") {
+            context.fillStyle="green" ;
+        } else {
+            context.fillStyle="black" ;
+        }
+        context.fillRect(i, 0, 4*wScale, hScale) ;
     }
+}
+
+// function draw(data) {
+//     var container = document.getElementById('timeline');
+//     var chart = new google.visualization.Timeline(container);
+//     var dataTable = new google.visualization.DataTable();
+
+//     var startTime = new Date() ;
+//     var endTime = new Date() ;
+//     endTime.setDate(endTime.getDate()) ;
+//     startTime.setDate(endTime.getDate() - 600) ;
+
+//     dataTable.addColumn({ type: 'string', id: 'Instance' });
+//     dataTable.addColumn({ type: 'date', id: 'Start' });
+//     dataTable.addColumn({ type: 'date', id: 'End' });
+//     dataTable.addRows([
+//         [ 'Instance_0', startTime, endTime ],
+//         [ 'Instance_1', new Date(2016, 2, 2), new Date(2016, 5, 6) ],
+//         [ 'Instance_2', new Date(2016, 3, 3), new Date(2016, 5, 7) ],
+//     ]);
+
+//     chart.draw(dataTable);
+// }
+
+function drawData(dataArr) {
+    var span = document.getElementById("bits") ;
+    var html = "" ;
+    html = "<table>" ;
+    for (var i in dataArr) {
+        html += "<tr><td>" + dataArr[i] + "</td></tr>" ;
+    }
+    span.innerHTML = html ;
 }
 
 function getInstanceBits() {

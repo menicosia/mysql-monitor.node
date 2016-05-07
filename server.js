@@ -59,8 +59,11 @@ if (process.env.VCAP_APP_PORT) { var port = process.env.VCAP_APP_PORT ;}
 else { var port = 8080 ; }
 if (process.env.CF_INSTANCE_INDEX) { var myIndex = JSON.parse(process.env.CF_INSTANCE_INDEX) ; }
 else { myIndex = 0 ; }
+
+// Here lie the names of the Redis data structures that we'll read/write from
 var myInstance = "Instance_" + myIndex + "_Hash" ;
 var myInstanceBits = "Instance_" + myIndex + "_Bits" ;
+var myInstanceList = "Instance_" + myIndex + "_List" ;
 
 // Callback functions
 function handleDBConnect(err) {
@@ -113,7 +116,6 @@ function handleRedisConnect(message, err) {
         break ;
     case "ready":
         redisConnectionState = true ;
-        redisClient.hget(myInstance, "lastKeyUpdated", handleLastKey) ;
         redisClient.hget(myInstance, "lastUpdate", handleLastTime) ;
         util.log("Redis READY.") ;
         break ;
@@ -132,11 +134,10 @@ function recordDBStatusHelper(err, res, bool) {
         if (now < lastTime) {
             console.error("Last updated time is in the future?! Waiting to catch up...")
         } else {
-            nextKey = (lastOffset + (now-lastTime)) % numSecondsStore // round-robin when reaching N seconds
-            redisClient.setbit(myInstanceBits, nextKey, bool) ;
-            redisClient.hmset(myInstance, "lastKeyUpdated", nextKey, "lastUpdate", now) ;
-            lastOffset = nextKey ;
-            util.log("Updated DB status: " + bool + " lastKeyUpdated: " + nextKey + " lastUpdate: " + now) ;
+            redisClient.lpush(myInstanceList, bool) ;
+            redisClient.ltrim(myInstanceList, 0, numSecondsStore-1) ;
+            redisClient.hmset(myInstance, "lastUpdate", now) ;
+            util.log("Updated DB status: " + bool + " lastUpdate: " + now) ;
         }
     }
 }
@@ -172,18 +173,25 @@ function RedisConnect() {
     }
 }
 
-function bitsHelper(req, res, data) {
-    util.log("****************************************") ;
-    util.log(data) ;
-    res.end(data) ;
+function handleBits(request, response, reply) {
+    util.log("DATA: " + reply + "\n*******************\n") ;
+    util.log("Got response: " + JSON.stringify(reply)) ;
+    response.end(JSON.stringify(reply)) ;
     return(true) ;
 }
 
-function dispatchApi(req, res, method, query) {
+function dispatchApi(request, response, method, query) {
     switch(method) {
     case "0bits":
-        redisClient.get('Instance_0_Bits', function (err, reply) {
-            bitsHelper(req, res, reply) ;
+        redisClient.lrange('Instance_0_List', 0, -1, function (err, reply) {
+            var req = request ;
+            var res = response ;
+            if (err) {
+                util.log('**********************') ;
+                util.log('GOING. DOWN. CRASH: ' + err) ;
+            } else {
+                handleBits(req, res, reply) ;
+            }
         } ) ;
         break ;
     }
