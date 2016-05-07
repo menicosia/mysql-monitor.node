@@ -14,6 +14,7 @@ var numSecondsStore = 600 // Default 10 minutes
 // Variables
 var data = "" ;
 var activateState = Boolean(false) ;
+var localMode = Boolean(false) ;
 var pm_uri = "" ;
 var vcap_services = undefined ;
 var pm_credentials = undefined ;
@@ -26,16 +27,17 @@ var dbConnectState = Boolean(false) ;
 // Redis. Because this is cloud foundry, there's only ever expected to
 // be one of each index running ie there should be no conflicts of
 // multiple instances updating the same data.  There are two pieces of
-// data per instance: lastKeyUpdated/lastTime and a 600-bit bitmap
+// data per instance: lastTime and a 600-bit list (used to be Bit array)
 // which represents 10 min of data.
-// instance:0 lastKeyUpdated 0-599 lastUpdate SECS
-// instance:0 [bitmap]
+// Instance_0_Hash lastKeyUpdated 0-599 lastUpdate SECS
+// Instance_0_List ...
+
 var redis_credentials = undefined ;
+var redis_host = undefined ;
 var redisClient = undefined ;
 var redisConnectionState = Boolean(false) ;
 
 var lastUpdate ;
-var lastOffset ;
 
 // Setup based on Environment Variables
 if (process.env.VCAP_SERVICES) {
@@ -51,14 +53,26 @@ if (process.env.VCAP_SERVICES) {
     }
     if (vcap_services['redis']) {
         redis_credentials = vcap_services["redis"][0]["credentials"] ;
-        util.log("Got access credentials to redis: " + JSON.stringify(redis_credentials)) ;
+        util.log("Got access credentials to redis: " + redis_credentials["host"]
+                 + ":" + redis_credentials["port"]) ;
+    } else if (vcap_services['p-redis']) {
+        redis_credentials = vcap_services["p-redis"][0]["credentials"] ;
+        util.log("Got access credentials to p-redis: " + redis_credentials["host"]
+                 + ":" + redis_credentials["port"]) ;
     }
 }
 
 if (process.env.VCAP_APP_PORT) { var port = process.env.VCAP_APP_PORT ;}
 else { var port = 8080 ; }
 if (process.env.CF_INSTANCE_INDEX) { var myIndex = JSON.parse(process.env.CF_INSTANCE_INDEX) ; }
-else { myIndex = 0 ; }
+else {
+    util.log("CF not detected, attempting to run in local mode.") ;
+    localMode = true ;
+    pm_uri = "mysql://root@localhost:3306/default?reconnect=true" ;
+    activateState = true ;
+    redis_credentials = { 'password' : '', 'host' : '127.0.0.1', 'port' : '6379' } ;
+    myIndex = 0 ;
+}
 
 // Here lie the names of the Redis data structures that we'll read/write from
 var myInstance = "Instance_" + myIndex + "_Hash" ;
@@ -68,9 +82,10 @@ var myInstanceList = "Instance_" + myIndex + "_List" ;
 // Callback functions
 function handleDBConnect(err) {
     if (err) {
+        if (dbConnectState == true) { setTimeout(MySQLConnect, 1000) ; }
         dbConnectState = false ;
         console.error("Error connecting to DB: " + err.code + "\nWill try again in 1s.") ;
-        setTimeout(MySQLConnect, 1000) ;
+        recordDBStatus(Boolean(false)) ;
     } else {
         util.log("Connected to database. Commencing ping every 1s.") ;
         dbConnectState = true ;
@@ -90,24 +105,15 @@ function handleDBping(err) {
     }
 }
 
-function handleLastKey(err, res) {
-    if (err) {
-        util.log("Error from redis: " + err) ;
-    } else {
-        util.log("Setting lastOffset to: " + res) ;
-        lastOffset = res ;
-    }
-}
 function handleLastTime(err, res) {
     if (err) {
         util.log("Error from redis: " + err) ;
     } else {
-        util.log("Setting lastOffset to: " + res) ;
+        util.log("Setting lastUpdate to: " + res) ;
         lastTime = res ;
     }
 }
 function handleRedisConnect(message, err) {
-    util.log("handleRedisConnect called with message: " + message) ;
     switch (message) {
     case "error":
         redisConnectionState = false ;
@@ -134,10 +140,14 @@ function recordDBStatusHelper(err, res, bool) {
         if (now < lastTime) {
             console.error("Last updated time is in the future?! Waiting to catch up...")
         } else {
-            redisClient.lpush(myInstanceList, bool) ;
+            if (bool) {
+                redisClient.lpush(myInstanceList, 1) ;
+            } else {
+                redisClient.lpush(myInstanceList, 0) ;
+                util.log("DB down: " + bool + " lastUpdate: " + now) ;
+            }
             redisClient.ltrim(myInstanceList, 0, numSecondsStore-1) ;
             redisClient.hmset(myInstance, "lastUpdate", now) ;
-            util.log("Updated DB status: " + bool + " lastUpdate: " + now) ;
         }
     }
 }
@@ -156,6 +166,7 @@ function MySQLConnect() {
     if (activateState) {
         dbClient = mysql.createConnection(pm_uri)
         dbClient.connect(handleDBConnect) ;
+        dbClient.on('error', handleDBConnect) ;
     } else {
         dbClient = undefined ;
     }
@@ -163,8 +174,9 @@ function MySQLConnect() {
 
 function RedisConnect() {
     if (activateState && redis_credentials) {
+        util.log("Attempting to connect to redis...") ;
         redisClient = redis.createClient(redis_credentials["port"], redis_credentials["host"]) ;
-        redisClient.auth(redis_credentials["password"]) ;
+        if (! localMode) { redisClient.auth(redis_credentials["password"]) ; }
         redisClient.on("error", function(err) { handleRedisConnect("error", err) }) ;
         redisClient.on("ready", function(err) { handleRedisConnect("ready", undefined) }) ;
     } else {
@@ -174,8 +186,7 @@ function RedisConnect() {
 }
 
 function handleBits(request, response, reply) {
-    util.log("DATA: " + reply + "\n*******************\n") ;
-    util.log("Got response: " + JSON.stringify(reply)) ;
+    util.log("Returning array from Redis of length: " + reply.length) ;
     response.end(JSON.stringify(reply)) ;
     return(true) ;
 }
@@ -183,17 +194,21 @@ function handleBits(request, response, reply) {
 function dispatchApi(request, response, method, query) {
     switch(method) {
     case "0bits":
-        redisClient.lrange('Instance_0_List', 0, -1, function (err, reply) {
-            var req = request ;
-            var res = response ;
-            if (err) {
-                util.log('**********************') ;
-                util.log('GOING. DOWN. CRASH: ' + err) ;
-            } else {
-                handleBits(req, res, reply) ;
-            }
-        } ) ;
-        break ;
+        if (redisConnectionState) {
+            redisClient.lrange('Instance_0_List', 0, -1, function (err, reply) {
+                var req = request ;
+                var res = response ;
+                if (err) {
+                    util.log('[ERROR] querying redis: ' + err) ;
+                    process.exit(5) ;
+                } else {
+                    handleBits(req, res, reply) ;
+                }
+            } ) ;
+            break ;
+        } else {
+            response.end(false) ;
+        }
     }
 }
 
