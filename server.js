@@ -1,3 +1,5 @@
+// Mysql Monitor - an app to monitor availability of a MySQL database
+
 var finalhandler = require('finalhandler') ;
 var http = require('http') ;
 var serveStatic = require('serve-static') ;
@@ -15,7 +17,7 @@ var numSecondsStore = 600 // Default 10 minutes
 var data = "" ;
 var activateState = Boolean(false) ;
 var localMode = Boolean(false) ;
-var pm_uri = "" ;
+var pm_uri = undefined ;
 var vcap_services = undefined ;
 var pm_credentials = undefined ;
 var dbClient = undefined ;
@@ -68,9 +70,24 @@ if (process.env.CF_INSTANCE_INDEX) { var myIndex = JSON.parse(process.env.CF_INS
 else {
     util.log("CF not detected, attempting to run in local mode.") ;
     localMode = true ;
-    pm_uri = "mysql://root@localhost:3306/default?reconnect=true" ;
+    if (process.env.MYSQL_URI) {
+        pm_uri = process.env.MYSQL_URI ;
+    } else {
+        pm_uri = "mysql://root@localhost:3306/default?reconnect=true" ;
+    }
     activateState = true ;
-    redis_credentials = { 'password' : '', 'host' : '127.0.0.1', 'port' : '6379' } ;
+    if (process.env.REDIS_CREDS) {
+        creds = process.env.REDIS_CREDS.split(":") ;
+        if (3 != creds.length) {
+            util.error("[ERROR] REDIS_CREDS environment variable must be colon separated host:port:password") ;
+            process.exit(1) ;
+        } else {
+            redis_credentials = { 'password' : creds[2], 'host' : creds[0], 'port' : creds[1] } ;
+        }
+    } else {
+        redis_credentials = { 'password' : '', 'host' : '127.0.0.1', 'port' : '6379' } ;
+    }
+    util.log("MySQL URI: " + pm_uri) ;
     myIndex = 0 ;
 }
 
@@ -82,7 +99,7 @@ var myInstanceList = "Instance_" + myIndex + "_List" ;
 // Callback functions
 function handleDBConnect(err) {
     if (err) {
-        if (dbConnectState == true) { setTimeout(MySQLConnect, 1000) ; }
+        if (activateState == true) { setTimeout(MySQLConnect, 1000) ; }
         dbConnectState = false ;
         console.error("Error connecting to DB: " + err.code + "\nWill try again in 1s.") ;
         recordDBStatus(Boolean(false)) ;
@@ -214,13 +231,11 @@ function dispatchApi(request, response, method, query) {
 
 function requestHandler(request, response) {
     data = "" ;
-    var matchRequest = Boolean(false) ;
     requestParts = url.parse(request.url, true);
     rootCall = requestParts['pathname'].split('/')[1] ;
     util.log("Recieved request for: " + rootCall) ;
     switch (rootCall) {
     case "env":
-        matchRequest = true ;
 	      if (process.env) {
 	          data += "<p>" ;
 		        for (v in process.env) {
@@ -230,27 +245,28 @@ function requestHandler(request, response) {
 	      } else {
 		        data += "<p> No process env? <br>\n" ;
 	      }
+        response.write(data) ;
 	      break ;
     case "dbstatus":
-        matchRequest = true ;
         data += JSON.stringify({"dbStatus":dbConnectState}) ;
+        response.write(data) ;
         break ;
     case "ping":
-        matchRequest = true ;
         if (dbConnectState) {
             doPing() ;
             data += "OK, will ping the DB. Watch the log for a response." ;
         } else {
             data += "I'm sorry, Dave, I can't do that. No connection to the database." ;
         }
+        response.write(data) ;
         break ;
     case "api":
         var method = requestParts['pathname'].split('/')[2] ;
         dispatchApi(request, response, method, requestParts['query']) ;
-        return true ;
+        return true ; // short-circuit response.end below.
         break ;
-    default:
-        matchRequest = true ;
+    case "debug":
+        // This is the old code that was the original index page.
         data += "<h1>MySQL Monitor</h1>\n" ;
         data += "<p>" + strftime("%Y-%m-%d %H:%M") + "<br>\n" ;
         data += "<p>Request was: " + request.url + "<br>\n" ;
@@ -262,16 +278,17 @@ function requestHandler(request, response) {
         data += "</p\n<hr>\n" ;
         data += "<A HREF=\"" + url.resolve(request.url, "env") + "\">/env</A>  " ;
         data += "<A HREF=\"" + url.resolve(request.url, "ping") + "\">/ping</A>  " ;
+        response.write(data) ;
         break ;
+    default:
+        util.log("Unknown request: " + request.url) ;
+        response.statusCode = 404 ;
+        response.statusMessage = http.STATUS_CODES[404] ;
+        response.writeHead(404) ;
+        response.write("<H1>404 - Not Found</H1>") ;
     }
 
-    if (matchRequest) {
-	      response.end(data + '\n') ;
-        return(true) ;
-    } else {
-        return(false) ;
-    }
-
+    response.end() ;
 }
 
 // MAIN
