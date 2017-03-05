@@ -1,6 +1,7 @@
 ---
 applications:
 - name: mysql-monitor
+  buildpack: nodejs_buildpack
   disk_quota: 128M
   memory: 128M
   host: mysql-monitor
