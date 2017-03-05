@@ -1,8 +1,22 @@
 // Mysql Monitor client
 
-window.onload = function () {
+window.onload = init ;
+var dataWidth = 600 ;
+var maxDataHeight = 40 ;
+var stdDataHeight = 40 ;
+var timeSeries = null ;
+
+function init () {
     getInstanceBits() ;
     setInterval(getInstanceBits, 2000) ;
+
+    window.onresize = resizeToWindow ;
+}
+
+function resizeToWindow () {
+    dataWidth = window.innerWidth > 10 ? window.innerWidth - 10 : -1; // Allow 5px border
+    maxDataHeight = window.innerHeight - 2 ;
+    draw(dataWidth, maxDataHeight, timeSeries) ;
 }
 
 function bitmaskArray() {
@@ -28,23 +42,36 @@ function getInstanceBits() {
 }
 
 function showInstanceBits(response) {
-    var timeSeries = JSON.parse(response) ;
-    draw(timeSeries) ;
+    timeSeries = JSON.parse(response) ;
+    draw(dataWidth, maxDataHeight, timeSeries) ;
 }
 
-function draw(data) {
+function draw(maxWidth, maxHeight, data) {
+    if (! data) {
+        console.warn("Data not defined yet. Not rendering.") ;
+        return(false) ;
+    }
+    if ( -1 == maxWidth) {
+        console.warn("Window too small to render") ;
+        return(false) ;
+    }
+    // Same args as fillRect, but fill with a data array
     var dataPoints = data.length ;
-    var wScale = 1 ; // How fat each pulse shall be
-    var hScale = 40 ; // How long each pulse shall be
-
+    var effectiveWidth = dataPoints ;
+    var effectiveHeight = stdDataHeight ;
     var timeline = document.getElementById('timeline');
 
-    timeline.innerHTML = "<p><canvas id='connTimeline' width=" + dataPoints*wScale + " height=" + hScale + "></p>" ;
+    if (maxHeight < stdDataHeight) { effectiveHeight = maxHeight }
+    if (maxWidth < dataPoints) { effectiveWidth = maxWidth }
+
+    timeline.innerHTML = "<p><canvas id='connTimeline' width=" + effectiveWidth
+                         + " height=" + effectiveHeight + "></p>" ;
 
     var canvas = document.getElementById('connTimeline');
     var context = canvas.getContext("2d") ;
     context.fillStyle="lightblue" ;
-    context.fillRect(0, 20, 10, 30) ;
+    context.fillRect(0, 0, effectiveWidth, effectiveHeight) ;
+    // FIXME - probably rendering the wrong part of the data; focus on most recent
     for (var i in data) {
         rectOffset = i ;
         var dataPoint = data[i] ;
@@ -56,7 +83,6 @@ function draw(data) {
             console.warn("Value of dataPoint: " + dataPoint) ;
             context.fillStyle="black" ;
         }
-        context.fillRect(i, 0, 1, 40) ;
+        context.fillRect(i, 0, 1, effectiveHeight) ;
     }
 }
-
