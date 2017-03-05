@@ -14,7 +14,7 @@ function init () {
 }
 
 function resizeToWindow () {
-    dataWidth = window.innerWidth > 10 ? window.innerWidth - 10 : -1; // Allow 5px border
+    dataWidth = window.innerWidth > 20 ? window.innerWidth - 20 : -1; // Allow 5px border
     maxDataHeight = window.innerHeight - 2 ;
     draw(dataWidth, maxDataHeight, timeSeries) ;
 }
