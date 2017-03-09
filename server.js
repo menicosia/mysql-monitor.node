@@ -48,19 +48,31 @@ if (process.env.VCAP_SERVICES) {
         pm_uri = vcap_services["p-mysql"][0]["credentials"]["uri"] ;
         util.log("Got access p-mysql credentials: " + pm_uri) ;
         activateState=true ;
+    } else if (vcap_services['dedicated-pivotal-mysql']) {
+        pm_uri = vcap_services["dedicated-pivotal-mysql"][0]["credentials"]["uri"] ;
+        util.log("Got access dedicated-pivotal-mysql credentials: " + pm_uri) ;
+        activateState=true ;
     } else if (vcap_services['cleardb']) {
         pm_uri = vcap_services["cleardb"][0]["credentials"]["uri"];
         util.log("Got access to cleardb credentials: " + pm_uri) ;
         activateState=true;
+    } else {
+        util.log("No VCAP_SERVICES mysql bindings. Will attempt to connect via 'MYSQL_URI'")
     }
     if (vcap_services['redis']) {
         redis_credentials = vcap_services["redis"][0]["credentials"] ;
         util.log("Got access credentials to redis: " + redis_credentials["host"]
                  + ":" + redis_credentials["port"]) ;
+    } else if (vcap_services['rediscloud']) {
+        redis_credentials = vcap_services["rediscloud"][0]["credentials"] ;
+        util.log("Got access credentials to redis: " + redis_credentials["hostname"]
+                 + ":" + redis_credentials["port"]) ;
     } else if (vcap_services['p-redis']) {
         redis_credentials = vcap_services["p-redis"][0]["credentials"] ;
         util.log("Got access credentials to p-redis: " + redis_credentials["host"]
                  + ":" + redis_credentials["port"]) ;
+    } else {
+        util.log("No VCAP_SERVICES redis bindings. Will attempt to connect via 'REDIS_CREDS'")
     }
 }
 
@@ -79,7 +91,7 @@ else {
     if (process.env.REDIS_CREDS) {
         creds = process.env.REDIS_CREDS.split(":") ;
         if (3 != creds.length) {
-            util.error("[ERROR] REDIS_CREDS environment variable must be colon separated host:port:password") ;
+            console.error("[ERROR] REDIS_CREDS environment variable must be colon separated host:port:password") ;
             process.exit(1) ;
         } else {
             redis_credentials = { 'password' : creds[2], 'host' : creds[0], 'port' : creds[1] } ;
@@ -87,7 +99,7 @@ else {
     } else {
         redis_credentials = { 'password' : '', 'host' : '127.0.0.1', 'port' : '6379' } ;
     }
-    util.log("MySQL URI: " + pm_uri) ;
+    console.log("MySQL URI: " + pm_uri) ;
     myIndex = 0 ;
 }
 
@@ -104,7 +116,7 @@ function handleDBConnect(err) {
         console.error("Error connecting to DB: " + err.code + "\nWill try again in 1s.") ;
         recordDBStatus(Boolean(false)) ;
     } else {
-        util.log("Connected to database. Commencing ping every 1s.") ;
+        console.log("Connected to database. Commencing ping every 1s.") ;
         dbConnectState = true ;
         setInterval(doPing, 1000) ;
     }
@@ -124,9 +136,9 @@ function handleDBping(err) {
 
 function handleLastTime(err, res) {
     if (err) {
-        util.log("Error from redis: " + err) ;
+        console.error("Error from redis: " + err) ;
     } else {
-        util.log("Setting lastUpdate to: " + res) ;
+        console.log("Setting lastUpdate to: " + res) ;
         lastTime = res ;
     }
 }
@@ -134,13 +146,16 @@ function handleRedisConnect(message, err) {
     switch (message) {
     case "error":
         redisConnectionState = false ;
-        util.log("Redis connection failed: " + err + "\nWill try again in 3s." ) ;
+        console.warn("Redis connection failed: " + err + "\nWill try again in 3s." ) ;
         setTimeout(RedisConnect, 3000) ;
         break ;
     case "ready":
         redisConnectionState = true ;
         redisClient.hget(myInstance, "lastUpdate", handleLastTime) ;
-        util.log("Redis READY.") ;
+        console.log("Redis READY.") ;
+        break ;
+    default:
+        console.warn("Redis connection result neither error nor ready?!") ;
         break ;
     }
 }
@@ -149,7 +164,7 @@ function handleRedisConnect(message, err) {
 // Helper functions
 function recordDBStatusHelper(err, res, bool) {
     if (err) {
-        util.log("Error from redis: " + err) ;
+        console.error("Error from redis: " + err) ;
     } else {
         // write a 1 to the current second in redis
         lastTime = res ;
@@ -161,7 +176,7 @@ function recordDBStatusHelper(err, res, bool) {
                 redisClient.lpush(myInstanceList, 1) ;
             } else {
                 redisClient.lpush(myInstanceList, 0) ;
-                util.log("DB down: " + bool + " lastUpdate: " + now) ;
+                console.log("DB down: " + bool + " lastUpdate: " + now) ;
             }
             redisClient.ltrim(myInstanceList, 0, numSecondsStore-1) ;
             redisClient.hmset(myInstance, "lastUpdate", now) ;
@@ -191,8 +206,12 @@ function MySQLConnect() {
 
 function RedisConnect() {
     if (activateState && redis_credentials) {
-        util.log("Attempting to connect to redis...") ;
-        redisClient = redis.createClient(redis_credentials["port"], redis_credentials["host"]) ;
+        console.log("Attempting to connect to redis...") ;
+        if (redis_credentials["host"]) {
+          redisClient = redis.createClient(redis_credentials["port"], redis_credentials["host"]) ;
+        } else {
+          redisClient = redis.createClient(redis_credentials["port"], redis_credentials["hostname"]) ;
+        }
         if (! localMode) { redisClient.auth(redis_credentials["password"]) ; }
         redisClient.on("error", function(err) { handleRedisConnect("error", err) }) ;
         redisClient.on("ready", function(err) { handleRedisConnect("ready", undefined) }) ;
@@ -203,7 +222,7 @@ function RedisConnect() {
 }
 
 function handleBits(request, response, reply) {
-    util.log("Returning array from Redis of length: " + reply.length) ;
+    console.log("Returning array from Redis of length: " + reply.length) ;
     response.end(JSON.stringify(reply)) ;
     return(true) ;
 }
@@ -216,7 +235,7 @@ function dispatchApi(request, response, method, query) {
                 var req = request ;
                 var res = response ;
                 if (err) {
-                    util.log('[ERROR] querying redis: ' + err) ;
+                    console.error('[ERROR] querying redis: ' + err) ;
                     process.exit(5) ;
                 } else {
                     handleBits(req, res, reply) ;
@@ -233,7 +252,7 @@ function requestHandler(request, response) {
     data = "" ;
     requestParts = url.parse(request.url, true);
     rootCall = requestParts['pathname'].split('/')[1] ;
-    util.log("Recieved request for: " + rootCall) ;
+    console.log("Recieved request for: " + rootCall) ;
     switch (rootCall) {
     case "env":
 	      if (process.env) {
@@ -281,7 +300,7 @@ function requestHandler(request, response) {
         response.write(data) ;
         break ;
     default:
-        util.log("Unknown request: " + request.url) ;
+        console.log("Unknown request: " + request.url) ;
         response.statusCode = 404 ;
         response.statusMessage = http.STATUS_CODES[404] ;
         response.writeHead(404) ;
@@ -304,5 +323,4 @@ if (activateState) {
     RedisConnect() ;
 }
 
-util.log("Server up and listening on port: " + port) ;
-
+console.log("Server up and listening on port: " + port) ;
