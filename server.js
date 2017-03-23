@@ -48,9 +48,9 @@ if (process.env.VCAP_SERVICES) {
         pm_uri = vcap_services["p-mysql"][0]["credentials"]["uri"] ;
         util.log("Got access p-mysql credentials: " + pm_uri) ;
         activateState=true ;
-    } else if (vcap_services['dedicated-pivotal-mysql']) {
-        pm_uri = vcap_services["dedicated-pivotal-mysql"][0]["credentials"]["uri"] ;
-        util.log("Got access dedicated-pivotal-mysql credentials: " + pm_uri) ;
+    } else if (vcap_services['p.mysql']) {
+        pm_uri = vcap_services["p.mysql"][0]["credentials"]["uri"] ;
+        util.log("Got access p.mysql credentials: " + pm_uri) ;
         activateState=true ;
     } else if (vcap_services['cleardb']) {
         pm_uri = vcap_services["cleardb"][0]["credentials"]["uri"];
