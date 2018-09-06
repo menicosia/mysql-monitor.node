@@ -46,9 +46,13 @@ var lastUpdate ;
 // Setup based on Environment Variables
 if (process.env.VCAP_SERVICES) {
     vcap_services = JSON.parse(process.env.VCAP_SERVICES) ;
-    
+
     mysql_creds = bindMySQL.getMySQLCreds() ;
-    if (mysql_creds) { activateState = true ; }
+    if (mysql_creds) {
+        activateState = true ;
+    } else {
+        console.log("No VCAP_SERVICES mysql bindings. Will attempt to connect via 'MYSQL_URI'")
+    }
 
     if (vcap_services['redis']) {
         redis_credentials = vcap_services["redis"][0]["credentials"] ;
