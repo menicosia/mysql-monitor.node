@@ -9,6 +9,7 @@ var url = require('url') ;
 var mysql = require('mysql') ;
 var redis = require('redis') ;
 var util = require('util') ;
+var bindMySQL = require('./bind-mysql.js') ;
 
 // CONFIGURE THESE
 var numSecondsStore = 600 // Default 10 minutes
@@ -17,11 +18,12 @@ var numSecondsStore = 600 // Default 10 minutes
 var data = "" ;
 var activateState = Boolean(false) ;
 var localMode = Boolean(false) ;
-var pm_uri = undefined ;
 var vcap_services = undefined ;
-var pm_credentials = undefined ;
 var dbClient = undefined ;
 var dbConnectState = Boolean(false) ;
+
+var connectInterval = undefined ;
+var pingInterval = undefined ;
 
 // REDIS DOCUMENTATION
 
@@ -44,21 +46,10 @@ var lastUpdate ;
 // Setup based on Environment Variables
 if (process.env.VCAP_SERVICES) {
     vcap_services = JSON.parse(process.env.VCAP_SERVICES) ;
-    if (vcap_services['p-mysql']) {
-        pm_uri = vcap_services["p-mysql"][0]["credentials"]["uri"] ;
-        util.log("Got access p-mysql credentials: " + pm_uri) ;
-        activateState=true ;
-    } else if (vcap_services['dedicated-pivotal-mysql']) {
-        pm_uri = vcap_services["dedicated-pivotal-mysql"][0]["credentials"]["uri"] ;
-        util.log("Got access dedicated-pivotal-mysql credentials: " + pm_uri) ;
-        activateState=true ;
-    } else if (vcap_services['cleardb']) {
-        pm_uri = vcap_services["cleardb"][0]["credentials"]["uri"];
-        util.log("Got access to cleardb credentials: " + pm_uri) ;
-        activateState=true;
-    } else {
-        util.log("No VCAP_SERVICES mysql bindings. Will attempt to connect via 'MYSQL_URI'")
-    }
+    
+    mysql_creds = bindMySQL.getMySQLCreds() ;
+    if (mysql_creds) { activateState = true ; }
+
     if (vcap_services['redis']) {
         redis_credentials = vcap_services["redis"][0]["credentials"] ;
         util.log("Got access credentials to redis: " + redis_credentials["host"]
@@ -83,9 +74,9 @@ else {
     util.log("CF not detected, attempting to run in local mode.") ;
     localMode = true ;
     if (process.env.MYSQL_URI) {
-        pm_uri = process.env.MYSQL_URI ;
+        mysql_creds["uri"] = process.env.MYSQL_URI ;
     } else {
-        pm_uri = "mysql://root@localhost:3306/default?reconnect=true" ;
+        mysql_creds["uri"] = "mysql://root@localhost:3306/default?reconnect=true" ;
     }
     activateState = true ;
     if (process.env.REDIS_CREDS) {
@@ -99,7 +90,7 @@ else {
     } else {
         redis_credentials = { 'password' : '', 'host' : '127.0.0.1', 'port' : '6379' } ;
     }
-    console.log("MySQL URI: " + pm_uri) ;
+    console.log("MySQL URI: " + mysql_creds["uri"] ) ;
     myIndex = 0 ;
 }
 
@@ -111,14 +102,18 @@ var myInstanceList = "Instance_" + myIndex + "_List" ;
 // Callback functions
 function handleDBConnect(err) {
     if (err) {
-        if (activateState == true) { setTimeout(MySQLConnect, 1000) ; }
+        if (activateState == true) {
+            connectInterval = setTimeout(MySQLConnect, 1000) ;
+        }
         dbConnectState = false ;
-        console.error("Error connecting to DB: " + err.code + "\nWill try again in 1s.") ;
-        recordDBStatus(Boolean(false)) ;
+        console.error("Error connecting to DB: " + err.code + "... Will try again in 1s.") ;
+        recordDBStatus(0) ;
     } else {
+        dbClient.on('error', handleDBConnect) ;
         console.log("Connected to database. Commencing ping every 1s.") ;
         dbConnectState = true ;
-        setInterval(doPing, 1000) ;
+        clearInterval(connectInterval) ;
+        pingInterval = setInterval(doPing, 1000) ;
     }
 }
 
@@ -127,9 +122,10 @@ function handleDBping(err) {
         console.error('MySQL Connection error: ' + err) ;
         recordDBStatus(0) ;
         dbClient.destroy() ;
+        clearInterval(pingInterval) ;
         MySQLConnect() ;
     } else {
-        // util.log("[" + myIndex + "] Server responded to ping.") ;
+        console.log("[" + myIndex + "] Server responded to ping.") ;
         recordDBStatus(1) ;
     }
 }
@@ -151,6 +147,8 @@ function handleRedisConnect(message, err) {
         break ;
     case "ready":
         redisConnectionState = true ;
+        redisClient.on("error", function(err) { handleRedisConnect("error", err) }) ;
+        // redisClient.on("ready", function(err) { handleRedisConnect("ready", undefined) }) ;
         redisClient.hget(myInstance, "lastUpdate", handleLastTime) ;
         console.log("Redis READY.") ;
         break ;
@@ -164,7 +162,8 @@ function handleRedisConnect(message, err) {
 // Helper functions
 function recordDBStatusHelper(err, res, bool) {
     if (err) {
-        console.error("Error from redis: " + err) ;
+        console.log("Error from redis: " + err) ;
+        // Assume that handleRedisConnect's on("error") will kick in?
     } else {
         // write a 1 to the current second in redis
         lastTime = res ;
@@ -196,15 +195,16 @@ function doPing() {
 
 function MySQLConnect() {
     if (activateState) {
-        dbClient = mysql.createConnection(pm_uri)
+        dbClient = mysql.createConnection(mysql_creds["uri"])
         dbClient.connect(handleDBConnect) ;
-        dbClient.on('error', handleDBConnect) ;
+        // dbClient.on('error', handleDBConnect) ;
     } else {
         dbClient = undefined ;
     }
 }
 
 function RedisConnect() {
+    if (redisClient) { redisClient.end() }
     if (activateState && redis_credentials) {
         console.log("Attempting to connect to redis...") ;
         if (redis_credentials["host"]) {
@@ -213,7 +213,7 @@ function RedisConnect() {
           redisClient = redis.createClient(redis_credentials["port"], redis_credentials["hostname"]) ;
         }
         if (! localMode) { redisClient.auth(redis_credentials["password"]) ; }
-        redisClient.on("error", function(err) { handleRedisConnect("error", err) }) ;
+        // redisClient.on("error", function(err) { handleRedisConnect("error", err) }) ;
         redisClient.on("ready", function(err) { handleRedisConnect("ready", undefined) }) ;
     } else {
         redisClient = undefined ;
@@ -290,7 +290,7 @@ function requestHandler(request, response) {
         data += "<p>" + strftime("%Y-%m-%d %H:%M") + "<br>\n" ;
         data += "<p>Request was: " + request.url + "<br>\n" ;
         if (activateState) {
-	          data += "Database connection info: " + pm_uri + "<br>\n" ;
+	          data += "Database connection info: " + mysql_creds["uri"] + "<br>\n" ;
         } else {
             data += "Database info is NOT SET</br>\n" ;
         }
@@ -318,8 +318,11 @@ monitorServer = http.createServer(function(req, res) {
 }) ;
 
 monitorServer.listen(port) ;
+
 if (activateState) {
+    console.log("Connecting to MySQL...") ;
     MySQLConnect() ;
+    console.log("Connecting to Redis...") ;
     RedisConnect() ;
 }
 
