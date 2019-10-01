@@ -6,5 +6,5 @@ applications:
   memory: 128M
   host: mysql-monitor
   services:
-    - mysql-monitor-db
-    - mysql-monitor-redis
+    - acceptDB
+    - mysql-monitoring-redis-cloud
